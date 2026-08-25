@@ -94,6 +94,9 @@ export class LambdaSimulatorStack extends Stack {
             'MatchupStateMachine',
             this.runGameFunction,
             this.aggregateMatchupFunction,
+            this.resultsBucket,
         );
+        this.resultsBucket.grantReadWrite(this.matchupStateMachine);
+        this.resultsBucket.grantRead(this.aggregateMatchupFunction);
     }
 }

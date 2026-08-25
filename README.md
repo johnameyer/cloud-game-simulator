@@ -11,7 +11,7 @@ This project fans Pokemon Pocket TCG deck simulations out across AWS Lambda. One
 ## How it works
 
 - `run-game` plays one game (via `SimulationRunner.runSingleGame` from deck-simulations) and writes its log and trace to the S3 results bucket.
-- A Step Functions state machine fans a matchup's games out to `run-game` with a `Map` state. `aggregate-matchup` then writes a `MatchupSummary` (win, tie and timeout rates) to S3 and to the `Matchups` DynamoDB table.
+- A Step Functions state machine fans a matchup's games out to `run-game` with a Distributed `Map`. Its `ResultWriter` stores the per-game results in S3 as a `manifest.json` plus per-status result files, since inline results are capped at 256KB. `aggregate-matchup` reads those and writes a `MatchupSummary` (win, tie and timeout rates) to S3 and to the `Matchups` DynamoDB table.
 
 ## Getting Started
 
@@ -53,6 +53,8 @@ Confirm the returned `logKey` (and `traceKey`) exist in the results bucket, and 
 
 - The Lambda must be bundled as CJS (`bundling.format: OutputFormat.CJS` in `infra/stack.ts`), not ESM. ESM bundling produced two distinct copies of the `CardRepository` class across module instances and crashed at runtime ("CardRepository2 is not a constructor"). For the same reason, `pocket-tcg`, `deck-simulations` and `game-data` must all resolve to a single copy of `@cards-ts/pocket-tcg`; a mismatched version pin on one of them reintroduces the crash.
 - Step Functions' `$$.Map.Item.Value` (the current item, in the Context Object) only resolves in a `Map`/`DistributedMap` state's own `itemSelector`. Referencing it inside a nested Task's `payload`/`Parameters` fails at runtime with "could not be found in the input", even though it type-checks and synths fine. Shape the per-iteration input in the `itemSelector` and have the nested task read plain `$.field` paths from that.
+- A Distributed Map's per-status result files (e.g. `SUCCEEDED_0.json`) store each iteration's `Output` as a JSON-stringified string rather than a nested object, so `aggregate-matchup.ts`'s `readGameResults` has to `JSON.parse` it.
+- `aws-cdk-lib`'s `ResultWriter`/`DistributedMapProps#resultWriter` are deprecated in favor of `ResultWriterV2`/`resultWriterV2`. They still work, but are worth migrating before they are removed.
 
 ## Project layout
 

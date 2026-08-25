@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 
 const s3 = new S3Client({});
 
@@ -21,4 +21,13 @@ export async function putArtifact(bucket: string, key: string, body: string): Pr
         Body: body,
         ContentType: 'text/plain',
     }));
+}
+
+export async function getObjectJson<T>(bucket: string, key: string): Promise<T> {
+    const response = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+    const body = await response.Body?.transformToString();
+    if (!body) {
+        throw new Error(`Empty or missing S3 object body: s3://${bucket}/${key}`);
+    }
+    return JSON.parse(body) as T;
 }

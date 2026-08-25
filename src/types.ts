@@ -30,15 +30,62 @@ export type RunGameResult = {
 };
 
 /**
- * Input event for the aggregate-matchup Lambda: every game result from one
- * matchup's fan-out, plus the matchup identity needed to write the summary.
+ * Reference to a Distributed Map's ResultWriter output: a manifest in S3
+ * listing where each child iteration's result was written, rather than the
+ * results being inlined in the state (which would blow past Step Functions'
+ * 256KB payload limit once game/matchup counts grow).
+ */
+export type DistributedMapResultWriterOutput = {
+    ResultWriterDetails: {
+        Bucket: string;
+        Key: string;
+    };
+};
+
+/**
+ * Shape of the manifest.json a Distributed Map's ResultWriter writes to S3.
+ */
+export type MapRunManifest = {
+    DestinationBucket: string;
+    MapRunArn: string;
+    ResultFiles: {
+        SUCCEEDED: MapRunResultFileRef[];
+        FAILED: MapRunResultFileRef[];
+        PENDING: MapRunResultFileRef[];
+    };
+};
+
+export type MapRunResultFileRef = {
+    Key: string;
+    Size: number;
+    ItemCount: number;
+};
+
+/**
+ * One entry in a SUCCEEDED/FAILED result file the manifest points to.
+ */
+export type MapRunResultRecord<T> = {
+    ExecutionArn: string;
+    Name: string;
+    Status: 'SUCCEEDED' | 'FAILED';
+    StartDate: string;
+    StopDate: string;
+    Output?: T;
+    Error?: string;
+    Cause?: string;
+};
+
+/**
+ * Input event for the aggregate-matchup Lambda: a pointer to the Distributed
+ * Map's result manifest for one matchup's fan-out, plus the matchup identity
+ * needed to write the summary.
  */
 export type AggregateMatchupEvent = {
     runId: string;
     matchupId: string;
     deck0Id: string;
     deck1Id: string;
-    gameResults: RunGameResult[];
+    mapRunOutput: DistributedMapResultWriterOutput;
 };
 
 export type MatchupOutcomeCounts = {
