@@ -53,6 +53,27 @@ cat out.json
 Confirm the returned `logKey` (and `traceKey`) exist in the results bucket, and that the
 `result` matches the shape produced by `deck-simulations`'s CLI for the same deck pair.
 
+## Design notes
+
+### S3 retention
+
+`ResultsBucket` has four lifecycle rules, all driven by shared names in
+`src/artifact-retention.ts` (imported by both the Lambda code that writes the tags/prefixes
+and `infra/stack.ts` where the rules are defined, so the two can't drift out of sync):
+
+| What | Tag/prefix | Retention |
+| --- | --- | --- |
+| Per-game logs/traces (`run-game.ts`) | `retention=raw-game-artifact` | 90 days |
+| Matchup/run/matchups-list summaries (`aggregate-matchup.ts`, `aggregate-run.ts`, `generate-matchups.ts`) | `retention=summary` | 365 days |
+| Matchup-level Distributed Map `ResultWriter` output | `distributed-map-results/` prefix | 14 days |
+| Run-level Distributed Map `ResultWriter` output | `outer-distributed-map-results/` prefix | 14 days |
+
+Summaries are tagged rather than prefix-scoped because they live alongside per-game
+artifacts under the same `runs/{runId}/...` prefix hierarchy — S3 lifecycle rules only match
+literal key prefixes, not path segments in the middle of a key, so tags are what let
+`aggregate-matchup.ts`'s summary and `run-game.ts`'s log/trace (same `runs/{runId}/{matchupId}/`
+parent) get different retention.
+
 ## Gotchas
 
 - The Lambda must be bundled as CJS (`bundling.format: OutputFormat.CJS` in `infra/stack.ts`), not ESM. ESM bundling produced two distinct copies of the `CardRepository` class across module instances and crashed at runtime ("CardRepository2 is not a constructor"). For the same reason, `pocket-tcg`, `deck-simulations` and `game-data` must all resolve to a single copy of `@cards-ts/pocket-tcg`; a mismatched version pin on one of them reintroduces the crash.
@@ -77,6 +98,7 @@ cloud-game-simulator/
 │   │   ├── aggregate-run.ts      # Reduces matchup summaries into a run summary
 │   │   ├── generate-matchups.ts  # Expands deck ids into matchups.json
 │   │   └── run-game.ts           # Plays one game, writes log/trace to S3
+│   ├── artifact-retention.ts     # Retention tags/prefixes shared by handlers and stack
 │   ├── deck-resolver.ts          # Resolves a game-data deck id into a DeckConfiguration
 │   ├── matchups-table.ts         # Matchups DynamoDB helpers
 │   ├── runs-table.ts             # Runs DynamoDB helpers

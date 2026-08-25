@@ -7,6 +7,12 @@ import * as nodejsLambda from 'aws-cdk-lib/aws-lambda-nodejs';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as sfn from 'aws-cdk-lib/aws-stepfunctions';
 import { Construct } from 'constructs';
+import {
+    ArtifactRetentionTag,
+    RETENTION_TAG_KEY,
+    DISTRIBUTED_MAP_RESULTS_PREFIX,
+    OUTER_DISTRIBUTED_MAP_RESULTS_PREFIX,
+} from '../src/artifact-retention.js';
 import { buildMatchupStateMachine } from './state-machine.js';
 import { buildRunStateMachine } from './run-state-machine.js';
 
@@ -53,9 +59,35 @@ export class LambdaSimulatorStack extends Stack {
             removalPolicy: RemovalPolicy.RETAIN,
             lifecycleRules: [
                 {
-                    // Raw per-game logs/traces are cheap to regenerate; expire them
-                    // after 90 days to bound storage cost as run volume grows.
+                    // Raw per-game logs/traces (run-game.ts, tagged via
+                    // ArtifactRetentionTag.RAW_GAME_ARTIFACT) are cheap to
+                    // regenerate; expire them soonest to bound storage cost as
+                    // run volume grows.
+                    id: 'expire-raw-game-artifacts',
+                    tagFilters: { [RETENTION_TAG_KEY]: ArtifactRetentionTag.RAW_GAME_ARTIFACT },
                     expiration: Duration.days(90),
+                },
+                {
+                    // Matchup/run/matchups-list summaries (tagged via
+                    // ArtifactRetentionTag.SUMMARY) are the queryable,
+                    // report-facing artifacts - keep them noticeably longer
+                    // than the raw per-game data they're derived from.
+                    id: 'expire-summaries',
+                    tagFilters: { [RETENTION_TAG_KEY]: ArtifactRetentionTag.SUMMARY },
+                    expiration: Duration.days(365),
+                },
+                {
+                    // Distributed Map ResultWriter output (state-machine.ts,
+                    // run-state-machine.ts) is purely a debugging aid for
+                    // diagnosing fan-out failures - expire it fastest.
+                    id: 'expire-distributed-map-diagnostics',
+                    prefix: `${DISTRIBUTED_MAP_RESULTS_PREFIX}/`,
+                    expiration: Duration.days(14),
+                },
+                {
+                    id: 'expire-outer-distributed-map-diagnostics',
+                    prefix: `${OUTER_DISTRIBUTED_MAP_RESULTS_PREFIX}/`,
+                    expiration: Duration.days(14),
                 },
             ],
         });

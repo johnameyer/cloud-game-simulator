@@ -1,4 +1,4 @@
-import { putArtifact, runSummaryKey } from '../s3-artifacts.js';
+import { ArtifactRetentionTag, putArtifact, runSummaryKey } from '../s3-artifacts.js';
 import { queryMatchupSummaries } from '../matchups-table.js';
 import { putRunRecord } from '../runs-table.js';
 import type { AggregateRunEvent, RunSummary } from '../types.js';
@@ -33,7 +33,7 @@ export async function handler(event: AggregateRunEvent): Promise<RunSummary> {
         matchupSummaries,
     };
 
-    await putArtifact(RESULTS_BUCKET, summaryKey, JSON.stringify(runSummary, null, 2));
+    await putArtifact(RESULTS_BUCKET, summaryKey, JSON.stringify(runSummary, null, 2), ArtifactRetentionTag.SUMMARY);
     await putRunRecord(RUNS_TABLE, {
         runId: event.runId,
         totalMatchups: matchupSummaries.length,

@@ -5,6 +5,7 @@ import * as sfn from 'aws-cdk-lib/aws-stepfunctions';
 import * as tasks from 'aws-cdk-lib/aws-stepfunctions-tasks';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import { Construct } from 'constructs';
+import { OUTER_DISTRIBUTED_MAP_RESULTS_PREFIX } from '../src/artifact-retention.js';
 
 /**
  * generate-matchups resolves the run's matchup
@@ -64,7 +65,7 @@ export function buildRunStateMachine(
         },
         resultWriter: new sfn.ResultWriter({
             bucket: resultsBucket,
-            prefix: 'outer-distributed-map-results',
+            prefix: OUTER_DISTRIBUTED_MAP_RESULTS_PREFIX,
         }),
         resultPath: sfn.JsonPath.DISCARD,
     });

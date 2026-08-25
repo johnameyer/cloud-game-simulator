@@ -4,6 +4,7 @@ import * as sfn from 'aws-cdk-lib/aws-stepfunctions';
 import * as tasks from 'aws-cdk-lib/aws-stepfunctions-tasks';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import { Construct } from 'constructs';
+import { DISTRIBUTED_MAP_RESULTS_PREFIX } from '../src/artifact-retention.js';
 
 /**
  * One matchup, with the inner Map as a Distributed Map. This validates the ResultWriter
@@ -42,7 +43,7 @@ export function buildMatchupStateMachine(
         },
         resultWriter: new sfn.ResultWriter({
             bucket: resultsBucket,
-            prefix: 'distributed-map-results',
+            prefix: DISTRIBUTED_MAP_RESULTS_PREFIX,
         }),
     });
     runGamesForMatchup.itemProcessor(runGame);

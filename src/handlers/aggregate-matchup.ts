@@ -1,4 +1,4 @@
-import { getObjectJson, matchupSummaryKey, putArtifact } from '../s3-artifacts.js';
+import { ArtifactRetentionTag, getObjectJson, matchupSummaryKey, putArtifact } from '../s3-artifacts.js';
 import { putMatchupSummary } from '../matchups-table.js';
 import type {
     AggregateMatchupEvent,
@@ -92,7 +92,7 @@ export async function handler(event: AggregateMatchupEvent): Promise<MatchupSumm
         summaryKey,
     };
 
-    await putArtifact(RESULTS_BUCKET, summaryKey, JSON.stringify(summary, null, 2));
+    await putArtifact(RESULTS_BUCKET, summaryKey, JSON.stringify(summary, null, 2), ArtifactRetentionTag.SUMMARY);
     await putMatchupSummary(MATCHUPS_TABLE, summary);
 
     return summary;

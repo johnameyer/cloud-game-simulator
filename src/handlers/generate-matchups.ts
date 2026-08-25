@@ -1,4 +1,4 @@
-import { matchupsListKey, putArtifact } from '../s3-artifacts.js';
+import { ArtifactRetentionTag, matchupsListKey, putArtifact } from '../s3-artifacts.js';
 import type { GenerateMatchupsEvent, GenerateMatchupsResult, MatchupSpec } from '../types.js';
 
 const RESULTS_BUCKET = process.env.RESULTS_BUCKET;
@@ -43,7 +43,7 @@ export async function handler(event: GenerateMatchupsEvent): Promise<GenerateMat
     }));
 
     const matchupsKey = matchupsListKey(event.runId);
-    await putArtifact(RESULTS_BUCKET, matchupsKey, JSON.stringify(matchupSpecs));
+    await putArtifact(RESULTS_BUCKET, matchupsKey, JSON.stringify(matchupSpecs), ArtifactRetentionTag.SUMMARY);
 
     return {
         runId: event.runId,
