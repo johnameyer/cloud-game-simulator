@@ -1,0 +1,7 @@
+dist
+node_modules
+tsconfig.tsbuildinfo
+npm-debug.log
+docs
+package-lock.json
+cdk.out
