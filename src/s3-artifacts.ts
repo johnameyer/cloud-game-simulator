@@ -14,6 +14,14 @@ export function matchupSummaryKey(runId: string, matchupId: string): string {
     return `runs/${runId}/${matchupId}/matchup-summary.json`;
 }
 
+export function matchupsListKey(runId: string): string {
+    return `runs/${runId}/matchups.json`;
+}
+
+export function runSummaryKey(runId: string): string {
+    return `runs/${runId}/run-summary.json`;
+}
+
 export async function putArtifact(bucket: string, key: string, body: string): Promise<void> {
     await s3.send(new PutObjectCommand({
         Bucket: bucket,

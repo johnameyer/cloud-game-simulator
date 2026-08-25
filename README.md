@@ -12,6 +12,10 @@ This project fans Pokemon Pocket TCG deck simulations out across AWS Lambda. One
 
 - `run-game` plays one game (via `SimulationRunner.runSingleGame` from deck-simulations) and writes its log and trace to the S3 results bucket.
 - A Step Functions state machine fans a matchup's games out to `run-game` with a Distributed `Map`. Its `ResultWriter` stores the per-game results in S3 as a `manifest.json` plus per-status result files, since inline results are capped at 256KB. `aggregate-matchup` reads those and writes a `MatchupSummary` (win, tie and timeout rates) to S3 and to the `Matchups` DynamoDB table.
+- `generate-matchups` expands an explicit matchup list, or a list of deck ids into every pairwise matchup, into `matchups.json` in S3. A second state machine's outer Distributed `Map` reads that file and starts one synchronous child execution of the matchup state machine per matchup (`states:startExecution.sync:2`).
+- `aggregate-run` queries the `Matchups` table by `runId` and writes a run-level summary to S3 and to the `Runs` table.
+
+Scaling up is a matter of widening `maxConcurrency` on both Distributed Maps and pointing `generate-matchups` at a larger deck list.
 
 ## Getting Started
 
@@ -52,7 +56,8 @@ Confirm the returned `logKey` (and `traceKey`) exist in the results bucket, and 
 ## Gotchas
 
 - The Lambda must be bundled as CJS (`bundling.format: OutputFormat.CJS` in `infra/stack.ts`), not ESM. ESM bundling produced two distinct copies of the `CardRepository` class across module instances and crashed at runtime ("CardRepository2 is not a constructor"). For the same reason, `pocket-tcg`, `deck-simulations` and `game-data` must all resolve to a single copy of `@cards-ts/pocket-tcg`; a mismatched version pin on one of them reintroduces the crash.
-- Step Functions' `$$.Map.Item.Value` (the current item, in the Context Object) only resolves in a `Map`/`DistributedMap` state's own `itemSelector`. Referencing it inside a nested Task's `payload`/`Parameters` fails at runtime with "could not be found in the input", even though it type-checks and synths fine. Shape the per-iteration input in the `itemSelector` and have the nested task read plain `$.field` paths from that.
+- Step Functions' `$$.Map.Item.Value` and `$$.Execution.Input.*` (Context Object fields) only resolve in a `Map`/`DistributedMap` state's own `itemSelector`. Referencing either inside a nested Task's `input`/`payload`/`Parameters` fails at runtime with "could not be found in the input", even though it type-checks and synths fine. Shape the full per-iteration input (item fields and any outer-execution fields the nested task needs) in the `itemSelector`, and have the nested task read plain `$.field` paths from that.
+- A `DistributedMap`'s `ResultWriter` output is invaluable for debugging item failures. Add one even to a `Map` whose result you discard (`resultPath: JsonPath.DISCARD` is independent of whether a `resultWriter` is configured), and enable state machine CloudWatch Logs (`logs: { level: LogLevel.ALL, includeExecutionData: true }`) from the start. Without either, a failed Distributed Map only reports `States.ExceedToleratedFailureThreshold`.
 - A Distributed Map's per-status result files (e.g. `SUCCEEDED_0.json`) store each iteration's `Output` as a JSON-stringified string rather than a nested object, so `aggregate-matchup.ts`'s `readGameResults` has to `JSON.parse` it.
 - `aws-cdk-lib`'s `ResultWriter`/`DistributedMapProps#resultWriter` are deprecated in favor of `ResultWriterV2`/`resultWriterV2`. They still work, but are worth migrating before they are removed.
 
@@ -63,14 +68,18 @@ cloud-game-simulator/
 ├── bin/
 │   └── lambda-simulator.ts       # CDK app entry point
 ├── infra/                        # CDK stack and state machines
+│   ├── run-state-machine.ts      # Per-run state machine
 │   ├── stack.ts                  # CDK stack: bucket, tables, Lambdas, state machines
 │   └── state-machine.ts          # Per-matchup state machine
 ├── src/                          # Lambda code and shared helpers
 │   ├── handlers/                 # Lambda handlers
 │   │   ├── aggregate-matchup.ts  # Reduces a matchup's games into a summary
+│   │   ├── aggregate-run.ts      # Reduces matchup summaries into a run summary
+│   │   ├── generate-matchups.ts  # Expands deck ids into matchups.json
 │   │   └── run-game.ts           # Plays one game, writes log/trace to S3
 │   ├── deck-resolver.ts          # Resolves a game-data deck id into a DeckConfiguration
 │   ├── matchups-table.ts         # Matchups DynamoDB helpers
+│   ├── runs-table.ts             # Runs DynamoDB helpers
 │   ├── s3-artifacts.ts           # S3 key naming and put/get helpers
 │   └── types.ts                  # Lambda event/result shapes
 └── spec/                         # Unit tests (run without AWS)

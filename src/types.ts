@@ -112,3 +112,44 @@ export type MatchupSummary = {
     timeoutRate: number;
     summaryKey: string;
 };
+
+/**
+ * Input event for the generate-matchups Lambda: either an explicit list of
+ * deck pairs, or a flat deck id list to expand into every pairwise matchup.
+ */
+export type GenerateMatchupsEvent = {
+    runId: string;
+    numGames: number;
+    strategy?: HandlerStrategy;
+    matchups?: { deck0Id: string; deck1Id: string }[];
+    deckIds?: string[];
+};
+
+/**
+ * One item in the matchups.json array the outer Distributed Map iterates
+ * over - already shaped to match the matchup state machine's input.
+ */
+export type MatchupSpec = {
+    matchupId: string;
+    deck0Id: string;
+    deck1Id: string;
+    strategy: HandlerStrategy;
+    gameNumbers: number[];
+};
+
+export type GenerateMatchupsResult = {
+    runId: string;
+    matchupsKey: string;
+    count: number;
+};
+
+export type AggregateRunEvent = {
+    runId: string;
+};
+
+export type RunSummary = {
+    runId: string;
+    totalMatchups: number;
+    summaryKey: string;
+    matchupSummaries: MatchupSummary[];
+};

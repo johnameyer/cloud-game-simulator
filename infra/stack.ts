@@ -8,6 +8,7 @@ import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as sfn from 'aws-cdk-lib/aws-stepfunctions';
 import { Construct } from 'constructs';
 import { buildMatchupStateMachine } from './state-machine.js';
+import { buildRunStateMachine } from './run-state-machine.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -21,19 +22,29 @@ const BUNDLING = {
  *   + aggregate-matchup Lambda, Matchups table, and a plain
  *     Map-state Step Functions state machine fanning one matchup's games
  *     out to run-game.
- * Next: swap the plain Map for a Distributed Map and add an outer
- * Distributed Map + generate-matchups/aggregate-run steps.
+ *   the plain Map is a Distributed Map + ResultWriter.
+ *   + generate-matchups, an outer Distributed Map over
+ *     matchups (each item starting a synchronous child execution of the
+ *     matchup state machine), aggregate-run, and a Runs table.
  */
 export class LambdaSimulatorStack extends Stack {
     public readonly resultsBucket: s3.Bucket;
 
     public readonly matchupsTable: dynamodb.Table;
 
+    public readonly runsTable: dynamodb.Table;
+
     public readonly runGameFunction: nodejsLambda.NodejsFunction;
 
     public readonly aggregateMatchupFunction: nodejsLambda.NodejsFunction;
 
+    public readonly generateMatchupsFunction: nodejsLambda.NodejsFunction;
+
+    public readonly aggregateRunFunction: nodejsLambda.NodejsFunction;
+
     public readonly matchupStateMachine: sfn.StateMachine;
+
+    public readonly runStateMachine: sfn.StateMachine;
 
     constructor(scope: Construct, id: string, props?: StackProps) {
         super(scope, id, props);
@@ -52,6 +63,12 @@ export class LambdaSimulatorStack extends Stack {
         this.matchupsTable = new dynamodb.Table(this, 'MatchupsTable', {
             partitionKey: { name: 'runId', type: dynamodb.AttributeType.STRING },
             sortKey: { name: 'matchupId', type: dynamodb.AttributeType.STRING },
+            billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+            removalPolicy: RemovalPolicy.RETAIN,
+        });
+
+        this.runsTable = new dynamodb.Table(this, 'RunsTable', {
+            partitionKey: { name: 'runId', type: dynamodb.AttributeType.STRING },
             billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
             removalPolicy: RemovalPolicy.RETAIN,
         });
@@ -86,7 +103,7 @@ export class LambdaSimulatorStack extends Stack {
             },
             bundling: BUNDLING,
         });
-        this.resultsBucket.grantPut(this.aggregateMatchupFunction);
+        this.resultsBucket.grantReadWrite(this.aggregateMatchupFunction);
         this.matchupsTable.grantWriteData(this.aggregateMatchupFunction);
 
         this.matchupStateMachine = buildMatchupStateMachine(
@@ -97,6 +114,45 @@ export class LambdaSimulatorStack extends Stack {
             this.resultsBucket,
         );
         this.resultsBucket.grantReadWrite(this.matchupStateMachine);
-        this.resultsBucket.grantRead(this.aggregateMatchupFunction);
+
+        this.generateMatchupsFunction = new nodejsLambda.NodejsFunction(this, 'GenerateMatchupsFunction', {
+            entry: path.join(__dirname, '../src/handlers/generate-matchups.ts'),
+            handler: 'handler',
+            runtime: lambda.Runtime.NODEJS_22_X,
+            timeout: Duration.seconds(30),
+            memorySize: 256,
+            environment: {
+                RESULTS_BUCKET: this.resultsBucket.bucketName,
+            },
+            bundling: BUNDLING,
+        });
+        this.resultsBucket.grantPut(this.generateMatchupsFunction);
+
+        this.aggregateRunFunction = new nodejsLambda.NodejsFunction(this, 'AggregateRunFunction', {
+            entry: path.join(__dirname, '../src/handlers/aggregate-run.ts'),
+            handler: 'handler',
+            runtime: lambda.Runtime.NODEJS_22_X,
+            timeout: Duration.seconds(30),
+            memorySize: 256,
+            environment: {
+                RESULTS_BUCKET: this.resultsBucket.bucketName,
+                MATCHUPS_TABLE: this.matchupsTable.tableName,
+                RUNS_TABLE: this.runsTable.tableName,
+            },
+            bundling: BUNDLING,
+        });
+        this.resultsBucket.grantPut(this.aggregateRunFunction);
+        this.matchupsTable.grantReadData(this.aggregateRunFunction);
+        this.runsTable.grantWriteData(this.aggregateRunFunction);
+
+        this.runStateMachine = buildRunStateMachine(
+            this,
+            'RunStateMachine',
+            this.generateMatchupsFunction,
+            this.matchupStateMachine,
+            this.aggregateRunFunction,
+            this.resultsBucket,
+        );
+        this.resultsBucket.grantRead(this.runStateMachine);
     }
 }
