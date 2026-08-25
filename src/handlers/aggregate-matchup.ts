@@ -1,5 +1,6 @@
 import { ArtifactRetentionTag, getObjectJson, matchupSummaryKey, putArtifact } from '../s3-artifacts.js';
 import { putMatchupSummary } from '../matchups-table.js';
+import { resolveDeck } from '../deck-resolver.js';
 import type {
     AggregateMatchupEvent,
     MapRunManifest,
@@ -78,6 +79,21 @@ export async function handler(event: AggregateMatchupEvent): Promise<MatchupSumm
     const totalGames = gameResults.length;
     const summaryKey = matchupSummaryKey(event.runId, event.matchupId);
 
+    // Flat, unattributed union of everything played across every game in this
+    // matchup - see RunGameResult.playedCardTemplateIds for why attribution
+    // happens here (by intersecting against each deck's own card pool)
+    // rather than at the trace level.
+    const playedCardIds = new Set<string>();
+    for (const gameResult of gameResults) {
+        for (const cardId of gameResult.playedCardTemplateIds) {
+            playedCardIds.add(cardId);
+        }
+    }
+
+    const deck0 = resolveDeck(event.deck0Id);
+    const deck1 = resolveDeck(event.deck1Id);
+    const neverPlayedFor = (deck: { cardIds: string[] }): string[] => [ ...new Set(deck.cardIds) ].filter(cardId => !playedCardIds.has(cardId));
+
     const summary: MatchupSummary = {
         runId: event.runId,
         matchupId: event.matchupId,
@@ -90,6 +106,8 @@ export async function handler(event: AggregateMatchupEvent): Promise<MatchupSumm
         tieRate: outcomes.ties / totalGames,
         timeoutRate: outcomes.timeouts / totalGames,
         summaryKey,
+        deck0NeverPlayedCardIds: neverPlayedFor(deck0),
+        deck1NeverPlayedCardIds: neverPlayedFor(deck1),
     };
 
     await putArtifact(RESULTS_BUCKET, summaryKey, JSON.stringify(summary, null, 2), ArtifactRetentionTag.SUMMARY);

@@ -28,6 +28,16 @@ export function buildMatchupStateMachine(
         lambdaFunction: runGameFunction,
         payloadResponseOnly: true,
     });
+    // CDK's default LambdaInvoke retry list omits throttling - concurrent
+    // matchups (each running its own maxConcurrency-wide fan-out below) can
+    // burst well past the account's Lambda concurrency limit and get 429s
+    // that would otherwise fail the whole matchup instead of just backing off.
+    runGame.addRetry({
+        errors: [ 'Lambda.TooManyRequestsException' ],
+        interval: Duration.seconds(2),
+        maxAttempts: 6,
+        backoffRate: 2,
+    });
 
     const runGamesForMatchup = new sfn.DistributedMap(scope, 'RunGamesForMatchup', {
         itemsPath: '$.gameNumbers',

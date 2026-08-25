@@ -27,6 +27,15 @@ export type RunGameResult = {
     result: GameResult;
     logKey: string;
     traceKey?: string;
+    /**
+     * Template ids of every card played (or evolved into) by either side
+     * during this game, deduped. Flat/unattributed to a specific deck -
+     * aggregate-matchup intersects this against each deck's own card pool
+     * to figure out which deck each played card belongs to (see its
+     * card-usage aggregation for why that's good enough despite not
+     * tracking player position per card).
+     */
+    playedCardTemplateIds: string[];
 };
 
 /**
@@ -111,6 +120,15 @@ export type MatchupSummary = {
     tieRate: number;
     timeoutRate: number;
     summaryKey: string;
+    /**
+     * Card template ids from each deck's own list that never appeared in
+     * playedCardTemplateIds across any of this matchup's games. Scoped to
+     * one matchup only - aggregate-run intersects these across every
+     * matchup a deck appeared in to get the run-wide "never played" set
+     * (a card only counts once it was never played against ANY opponent).
+     */
+    deck0NeverPlayedCardIds: string[];
+    deck1NeverPlayedCardIds: string[];
 };
 
 /**
@@ -147,9 +165,30 @@ export type AggregateRunEvent = {
     runId: string;
 };
 
+/**
+ * A card the AI never chose to play with a given deck across every matchup
+ * that deck appeared in this run - the bug-hunting signal: cards that show
+ * up here reliably, across enough games, are candidates for AI/strategy
+ * bugs (never recognized as playable) rather than just bad luck on draws.
+ */
+export type NeverPlayedCard = {
+    templateId: string;
+    name?: string;
+};
+
+export type DeckCardUsage = {
+    deckId: string;
+    /** Total games this deck played across every matchup in the run. */
+    totalGames: number;
+    /** How many distinct matchups (opponents) this deck was tested against. */
+    matchupCount: number;
+    neverPlayedCards: NeverPlayedCard[];
+};
+
 export type RunSummary = {
     runId: string;
     totalMatchups: number;
     summaryKey: string;
     matchupSummaries: MatchupSummary[];
+    deckCardUsage: DeckCardUsage[];
 };

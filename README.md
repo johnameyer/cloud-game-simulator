@@ -55,6 +55,24 @@ Confirm the returned `logKey` (and `traceKey`) exist in the results bucket, and 
 
 ## Design notes
 
+### Card-usage analytics ("which cards does the AI never play")
+
+`run-game` returns `playedCardTemplateIds` (every card template id played or evolved into
+during that game, from the trace events) alongside the game result. `aggregate-matchup`
+unions that across a matchup's games and intersects it against each deck's own card pool to
+get `deck0NeverPlayedCardIds`/`deck1NeverPlayedCardIds` — cards from that deck's list that
+never appeared in any game of that matchup. `aggregate-run` then groups those by deck id
+(a deck can be `deck0` in one matchup and `deck1` in another) and **intersects** across every
+matchup the deck appeared in, so `RunSummary.deckCardUsage` only flags a card once the AI
+never played it against *any* opponent it faced that run — the bug-hunting signal, since a
+card missing in only one matchup is more likely a bad draw than a real gap in the bot's
+strategy. Names are resolved via `game-data`'s `CARDS` repository for readability.
+
+A card that shows up as never-played for **every deck it's in**, not just one, is the
+strongest signal — see `runs/{runId}/run-summary.json`'s `deckCardUsage`. Small game counts
+per matchup will produce false positives from cards that simply weren't drawn; this gets more
+reliable as `numGames` grows.
+
 ### S3 retention
 
 `ResultsBucket` has four lifecycle rules, all driven by shared names in
@@ -81,6 +99,7 @@ parent) get different retention.
 - A `DistributedMap`'s `ResultWriter` output is invaluable for debugging item failures. Add one even to a `Map` whose result you discard (`resultPath: JsonPath.DISCARD` is independent of whether a `resultWriter` is configured), and enable state machine CloudWatch Logs (`logs: { level: LogLevel.ALL, includeExecutionData: true }`) from the start. Without either, a failed Distributed Map only reports `States.ExceedToleratedFailureThreshold`.
 - A Distributed Map's per-status result files (e.g. `SUCCEEDED_0.json`) store each iteration's `Output` as a JSON-stringified string rather than a nested object, so `aggregate-matchup.ts`'s `readGameResults` has to `JSON.parse` it.
 - `aws-cdk-lib`'s `ResultWriter`/`DistributedMapProps#resultWriter` are deprecated in favor of `ResultWriterV2`/`resultWriterV2`. They still work, but are worth migrating before they are removed.
+- CDK's default `tasks.LambdaInvoke` retry list omits `Lambda.TooManyRequestsException`. Several matchups running concurrently (each fanning out with `maxConcurrency: 10`) can burst past the account's Lambda concurrency limit and get throttled, which without an explicit retry fails the whole matchup. `RunGame` in `infra/state-machine.ts` adds the retry via `.addRetry(...)`.
 
 ## Project layout
 
