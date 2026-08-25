@@ -10,6 +10,10 @@ export function gameTraceKey(runId: string, matchupId: string, gameNumber: numbe
     return `runs/${runId}/${matchupId}/games/${gameNumber}.trace.jsonl`;
 }
 
+export function matchupSummaryKey(runId: string, matchupId: string): string {
+    return `runs/${runId}/${matchupId}/matchup-summary.json`;
+}
+
 export async function putArtifact(bucket: string, key: string, body: string): Promise<void> {
     await s3.send(new PutObjectCommand({
         Bucket: bucket,

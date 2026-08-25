@@ -2,21 +2,38 @@ import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { Stack, StackProps, Duration, RemovalPolicy } from 'aws-cdk-lib';
 import * as s3 from 'aws-cdk-lib/aws-s3';
+import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as nodejsLambda from 'aws-cdk-lib/aws-lambda-nodejs';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as sfn from 'aws-cdk-lib/aws-stepfunctions';
 import { Construct } from 'constructs';
+import { buildMatchupStateMachine } from './state-machine.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+const BUNDLING = {
+    format: nodejsLambda.OutputFormat.CJS,
+};
+
 /**
- * lambda-simulator stack: a single run-game Lambda plus its results bucket,
- * invoked directly with no orchestration yet. A Step Functions state
- * machine is planned on top of this stack.
+ * lambda-simulator stack:
+ *   run-game Lambda + results bucket, invoked directly.
+ *   + aggregate-matchup Lambda, Matchups table, and a plain
+ *     Map-state Step Functions state machine fanning one matchup's games
+ *     out to run-game.
+ * Next: swap the plain Map for a Distributed Map and add an outer
+ * Distributed Map + generate-matchups/aggregate-run steps.
  */
 export class LambdaSimulatorStack extends Stack {
     public readonly resultsBucket: s3.Bucket;
 
+    public readonly matchupsTable: dynamodb.Table;
+
     public readonly runGameFunction: nodejsLambda.NodejsFunction;
+
+    public readonly aggregateMatchupFunction: nodejsLambda.NodejsFunction;
+
+    public readonly matchupStateMachine: sfn.StateMachine;
 
     constructor(scope: Construct, id: string, props?: StackProps) {
         super(scope, id, props);
@@ -32,6 +49,13 @@ export class LambdaSimulatorStack extends Stack {
             ],
         });
 
+        this.matchupsTable = new dynamodb.Table(this, 'MatchupsTable', {
+            partitionKey: { name: 'runId', type: dynamodb.AttributeType.STRING },
+            sortKey: { name: 'matchupId', type: dynamodb.AttributeType.STRING },
+            billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+            removalPolicy: RemovalPolicy.RETAIN,
+        });
+
         this.runGameFunction = new nodejsLambda.NodejsFunction(this, 'RunGameFunction', {
             entry: path.join(__dirname, '../src/handlers/run-game.ts'),
             handler: 'handler',
@@ -44,11 +68,32 @@ export class LambdaSimulatorStack extends Stack {
             environment: {
                 RESULTS_BUCKET: this.resultsBucket.bucketName,
             },
-            bundling: {
-                format: nodejsLambda.OutputFormat.CJS,
-            },
+            bundling: BUNDLING,
         });
-
         this.resultsBucket.grantPut(this.runGameFunction);
+
+        this.aggregateMatchupFunction = new nodejsLambda.NodejsFunction(this, 'AggregateMatchupFunction', {
+            entry: path.join(__dirname, '../src/handlers/aggregate-matchup.ts'),
+            handler: 'handler',
+            runtime: lambda.Runtime.NODEJS_22_X,
+            // Just S3/DynamoDB writes and arithmetic over an already-fetched
+            // game-results array; no game engine work happens here.
+            timeout: Duration.seconds(30),
+            memorySize: 256,
+            environment: {
+                RESULTS_BUCKET: this.resultsBucket.bucketName,
+                MATCHUPS_TABLE: this.matchupsTable.tableName,
+            },
+            bundling: BUNDLING,
+        });
+        this.resultsBucket.grantPut(this.aggregateMatchupFunction);
+        this.matchupsTable.grantWriteData(this.aggregateMatchupFunction);
+
+        this.matchupStateMachine = buildMatchupStateMachine(
+            this,
+            'MatchupStateMachine',
+            this.runGameFunction,
+            this.aggregateMatchupFunction,
+        );
     }
 }

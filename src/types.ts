@@ -28,3 +28,40 @@ export type RunGameResult = {
     logKey: string;
     traceKey?: string;
 };
+
+/**
+ * Input event for the aggregate-matchup Lambda: every game result from one
+ * matchup's fan-out, plus the matchup identity needed to write the summary.
+ */
+export type AggregateMatchupEvent = {
+    runId: string;
+    matchupId: string;
+    deck0Id: string;
+    deck1Id: string;
+    gameResults: RunGameResult[];
+};
+
+export type MatchupOutcomeCounts = {
+    player1Wins: number;
+    player2Wins: number;
+    ties: number;
+    timeouts: number;
+};
+
+/**
+ * Output of the aggregate-matchup Lambda, and the shape written to both the
+ * S3 matchup-summary.json and the Matchups DynamoDB table.
+ */
+export type MatchupSummary = {
+    runId: string;
+    matchupId: string;
+    deck0Id: string;
+    deck1Id: string;
+    totalGames: number;
+    outcomes: MatchupOutcomeCounts;
+    player1WinRate: number;
+    player2WinRate: number;
+    tieRate: number;
+    timeoutRate: number;
+    summaryKey: string;
+};
