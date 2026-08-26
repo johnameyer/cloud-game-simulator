@@ -37,6 +37,7 @@ export function buildRunStateMachine(
             'deck0Id.$': '$.deck0Id',
             'deck1Id.$': '$.deck1Id',
             'strategy.$': '$.strategy',
+            'ismctsOptions.$': '$.ismctsOptions',
             'gameNumbers.$': '$.gameNumbers',
         }),
     });
@@ -61,6 +62,7 @@ export function buildRunStateMachine(
             'deck0Id.$': '$$.Map.Item.Value.deck0Id',
             'deck1Id.$': '$$.Map.Item.Value.deck1Id',
             'strategy.$': '$$.Map.Item.Value.strategy',
+            'ismctsOptions.$': '$$.Map.Item.Value.ismctsOptions',
             'gameNumbers.$': '$$.Map.Item.Value.gameNumbers',
         },
         resultWriter: new sfn.ResultWriter({

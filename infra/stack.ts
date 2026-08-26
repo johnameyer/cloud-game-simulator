@@ -15,6 +15,7 @@ import {
 } from '../src/artifact-retention.js';
 import { buildMatchupStateMachine } from './state-machine.js';
 import { buildRunStateMachine } from './run-state-machine.js';
+import { computeEngineVersion } from './engine-version.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -39,6 +40,8 @@ export class LambdaSimulatorStack extends Stack {
     public readonly matchupsTable: dynamodb.Table;
 
     public readonly runsTable: dynamodb.Table;
+
+    public readonly matchupCacheTable: dynamodb.Table;
 
     public readonly runGameFunction: nodejsLambda.NodejsFunction;
 
@@ -105,14 +108,33 @@ export class LambdaSimulatorStack extends Stack {
             removalPolicy: RemovalPolicy.RETAIN,
         });
 
+        // Cache of matchup results keyed by matchupCacheId (see
+        // src/cache-key.ts) - self-invalidating: the id folds in the
+        // simulation engine's version and each deck's actual content hash,
+        // so a code change or an edited deck list produces a new id rather
+        // than serving stale cached results under the old one.
+        this.matchupCacheTable = new dynamodb.Table(this, 'MatchupCacheTable', {
+            partitionKey: { name: 'matchupCacheId', type: dynamodb.AttributeType.STRING },
+            billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+            removalPolicy: RemovalPolicy.RETAIN,
+        });
+
+        // Computed once at synth time from the engine repos' git state (see
+        // infra/engine-version.ts) and baked into the Lambdas that read/write
+        // the cache, so every deploy that changes engine code gets a new
+        // value automatically.
+        const engineVersion = computeEngineVersion();
+
         this.runGameFunction = new nodejsLambda.NodejsFunction(this, 'RunGameFunction', {
             entry: path.join(__dirname, '../src/handlers/run-game.ts'),
             handler: 'handler',
             runtime: lambda.Runtime.NODEJS_22_X,
-            // One game (ISMCTS default: 100 iterations/move) comfortably fits well
-            // under this; keep it tight so a hung game fails fast instead of
-            // burning a full Step Functions execution's time budget later.
-            timeout: Duration.seconds(90),
+            // A default-strategy game comfortably fits well under this; a
+            // high-iteration ISMCTS game (e.g. 1000 iterations/move) is far
+            // more expensive per move, hence the generous ceiling - still
+            // tight enough that a genuinely hung game fails well before the
+            // matchup state machine's own 30-minute timeout.
+            timeout: Duration.minutes(10),
             memorySize: 512,
             environment: {
                 RESULTS_BUCKET: this.resultsBucket.bucketName,
@@ -132,11 +154,14 @@ export class LambdaSimulatorStack extends Stack {
             environment: {
                 RESULTS_BUCKET: this.resultsBucket.bucketName,
                 MATCHUPS_TABLE: this.matchupsTable.tableName,
+                MATCHUP_CACHE_TABLE: this.matchupCacheTable.tableName,
+                ENGINE_VERSION: engineVersion,
             },
             bundling: BUNDLING,
         });
         this.resultsBucket.grantReadWrite(this.aggregateMatchupFunction);
         this.matchupsTable.grantWriteData(this.aggregateMatchupFunction);
+        this.matchupCacheTable.grantWriteData(this.aggregateMatchupFunction);
 
         this.matchupStateMachine = buildMatchupStateMachine(
             this,
@@ -155,10 +180,15 @@ export class LambdaSimulatorStack extends Stack {
             memorySize: 256,
             environment: {
                 RESULTS_BUCKET: this.resultsBucket.bucketName,
+                MATCHUPS_TABLE: this.matchupsTable.tableName,
+                MATCHUP_CACHE_TABLE: this.matchupCacheTable.tableName,
+                ENGINE_VERSION: engineVersion,
             },
             bundling: BUNDLING,
         });
         this.resultsBucket.grantPut(this.generateMatchupsFunction);
+        this.matchupsTable.grantWriteData(this.generateMatchupsFunction);
+        this.matchupCacheTable.grantReadData(this.generateMatchupsFunction);
 
         this.aggregateRunFunction = new nodejsLambda.NodejsFunction(this, 'AggregateRunFunction', {
             entry: path.join(__dirname, '../src/handlers/aggregate-run.ts'),

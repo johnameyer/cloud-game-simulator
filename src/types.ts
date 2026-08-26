@@ -1,6 +1,6 @@
-import type { HandlerStrategy, ISMCTSOptions, GameResult } from '@cards-ts/pocket-tcg-deck-simulations';
+import type { HandlerStrategy, ISMCTSOptions, GameResult, DeckConfiguration } from '@cards-ts/pocket-tcg-deck-simulations';
 
-export type { HandlerStrategy, ISMCTSOptions, GameResult };
+export type { HandlerStrategy, ISMCTSOptions, GameResult, DeckConfiguration };
 
 /**
  * Input event for the run-game Lambda: one game between two decks.
@@ -94,6 +94,8 @@ export type AggregateMatchupEvent = {
     matchupId: string;
     deck0Id: string;
     deck1Id: string;
+    strategy: HandlerStrategy;
+    ismctsOptions: ISMCTSOptions;
     mapRunOutput: DistributedMapResultWriterOutput;
 };
 
@@ -139,8 +141,17 @@ export type GenerateMatchupsEvent = {
     runId: string;
     numGames: number;
     strategy?: HandlerStrategy;
+    ismctsOptions?: ISMCTSOptions;
     matchups?: { deck0Id: string; deck1Id: string }[];
     deckIds?: string[];
+    /**
+     * Skip the matchup-result cache entirely and re-simulate everything for
+     * this run (still writes fresh results back to the cache for later runs
+     * to reuse). Normally unnecessary - the cache already invalidates itself
+     * on engine/deck changes (see cache-key.ts) - but useful to force a new
+     * random sample of an unchanged matchup.
+     */
+    forceRefresh?: boolean;
 };
 
 /**
@@ -152,13 +163,17 @@ export type MatchupSpec = {
     deck0Id: string;
     deck1Id: string;
     strategy: HandlerStrategy;
+    ismctsOptions: ISMCTSOptions;
     gameNumbers: number[];
 };
 
 export type GenerateMatchupsResult = {
     runId: string;
     matchupsKey: string;
+    /** Matchups that need fresh simulation (written to matchups.json). */
     count: number;
+    /** Matchups satisfied entirely from the cache - no simulation needed. */
+    cachedCount: number;
 };
 
 export type AggregateRunEvent = {

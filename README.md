@@ -73,6 +73,29 @@ strongest signal — see `runs/{runId}/run-summary.json`'s `deckCardUsage`. Smal
 per matchup will produce false positives from cards that simply weren't drawn; this gets more
 reliable as `numGames` grows.
 
+### Matchup result cache
+
+`generate-matchups` reuses a previous matchup's result instead of re-simulating when one
+already exists in the `MatchupCacheTable` for the same configuration and at least as many
+games as requested. No manual cache key to pass or remember — the cache id
+(`src/cache-key.ts`'s `buildMatchupCacheId`) is derived from:
+
+- `engineVersion` — a hash of the **compiled `dist/` output** of `pocket-tcg`, `ismcts`,
+  `deck-simulations`, and `game-data` (`infra/engine-version.ts`, computed at `cdk synth`
+  time). A code change to game rules, the AI, the shared runner, or card data changes this,
+  so a redeploy after any of those changes automatically invalidates every cached result.
+  (Deliberately hashes built output rather than a git SHA or dirty state, which would make the
+  cache miss on unrelated changes.)
+- Each deck's own content hash (its resolved `cardIds`/`energyTypes`, not just its id string)
+  — editing a deck's build in `game-data` invalidates only that deck's cached matchups.
+- `strategy` and `ismctsOptions` (deck pair is order-independent: A-vs-B and B-vs-A hit the
+  same entry).
+
+Set `GenerateMatchupsEvent.forceRefresh: true` to skip the cache for one run and force a
+fresh simulation (still writes the new result back to the cache for later runs).
+`ENGINE_VERSION` is computed from the installed packages' built `dist/` output, so make sure they
+are built before `cdk synth`/`deploy`.
+
 ### S3 retention
 
 `ResultsBucket` has four lifecycle rules, all driven by shared names in
@@ -108,6 +131,7 @@ cloud-game-simulator/
 ├── bin/
 │   └── lambda-simulator.ts       # CDK app entry point
 ├── infra/                        # CDK stack and state machines
+│   ├── engine-version.ts         # Hash of the engine packages' built output
 │   ├── run-state-machine.ts      # Per-run state machine
 │   ├── stack.ts                  # CDK stack: bucket, tables, Lambdas, state machines
 │   └── state-machine.ts          # Per-matchup state machine
@@ -118,7 +142,9 @@ cloud-game-simulator/
 │   │   ├── generate-matchups.ts  # Expands deck ids into matchups.json
 │   │   └── run-game.ts           # Plays one game, writes log/trace to S3
 │   ├── artifact-retention.ts     # Retention tags/prefixes shared by handlers and stack
+│   ├── cache-key.ts              # Matchup cache id derivation
 │   ├── deck-resolver.ts          # Resolves a game-data deck id into a DeckConfiguration
+│   ├── matchup-cache-table.ts    # Matchup cache DynamoDB helpers
 │   ├── matchups-table.ts         # Matchups DynamoDB helpers
 │   ├── runs-table.ts             # Runs DynamoDB helpers
 │   ├── s3-artifacts.ts           # S3 key naming and put/get helpers

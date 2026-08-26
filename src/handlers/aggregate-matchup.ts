@@ -1,6 +1,8 @@
 import { ArtifactRetentionTag, getObjectJson, matchupSummaryKey, putArtifact } from '../s3-artifacts.js';
 import { putMatchupSummary } from '../matchups-table.js';
 import { resolveDeck } from '../deck-resolver.js';
+import { buildMatchupCacheId } from '../cache-key.js';
+import { putMatchupCacheEntry } from '../matchup-cache-table.js';
 import type {
     AggregateMatchupEvent,
     MapRunManifest,
@@ -12,6 +14,8 @@ import type {
 
 const RESULTS_BUCKET = process.env.RESULTS_BUCKET;
 const MATCHUPS_TABLE = process.env.MATCHUPS_TABLE;
+const MATCHUP_CACHE_TABLE = process.env.MATCHUP_CACHE_TABLE;
+const ENGINE_VERSION = process.env.ENGINE_VERSION;
 
 /**
  * Reads every game result written by the Distributed Map's ResultWriter
@@ -53,6 +57,12 @@ export async function handler(event: AggregateMatchupEvent): Promise<MatchupSumm
     }
     if (!MATCHUPS_TABLE) {
         throw new Error('MATCHUPS_TABLE environment variable is not set');
+    }
+    if (!MATCHUP_CACHE_TABLE) {
+        throw new Error('MATCHUP_CACHE_TABLE environment variable is not set');
+    }
+    if (!ENGINE_VERSION) {
+        throw new Error('ENGINE_VERSION environment variable is not set');
     }
 
     const gameResults = await readGameResults(event.mapRunOutput);
@@ -112,6 +122,16 @@ export async function handler(event: AggregateMatchupEvent): Promise<MatchupSumm
 
     await putArtifact(RESULTS_BUCKET, summaryKey, JSON.stringify(summary, null, 2), ArtifactRetentionTag.SUMMARY);
     await putMatchupSummary(MATCHUPS_TABLE, summary);
+
+    const matchupCacheId = buildMatchupCacheId(ENGINE_VERSION, deck0, deck1, event.strategy, event.ismctsOptions);
+    await putMatchupCacheEntry(MATCHUP_CACHE_TABLE, {
+        matchupCacheId,
+        totalGames,
+        summary,
+        sourceRunId: event.runId,
+        sourceMatchupId: event.matchupId,
+        updatedAt: new Date().toISOString(),
+    });
 
     return summary;
 }

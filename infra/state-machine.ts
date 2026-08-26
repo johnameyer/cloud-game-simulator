@@ -43,12 +43,17 @@ export function buildMatchupStateMachine(
         itemsPath: '$.gameNumbers',
         maxConcurrency: 10,
         resultPath: '$.mapRunOutput',
+        // Note: ismctsOptions must always be present in the execution input
+        // (an empty object {} when not using ismcts) - $$.Execution.Input.*
+        // referenced here errors at runtime if the field is simply absent
+        // (see the README's Map-state gotchas).
         itemSelector: {
             'runId.$': '$$.Execution.Input.runId',
             'matchupId.$': '$$.Execution.Input.matchupId',
             'deck0Id.$': '$$.Execution.Input.deck0Id',
             'deck1Id.$': '$$.Execution.Input.deck1Id',
             'strategy.$': '$$.Execution.Input.strategy',
+            'ismctsOptions.$': '$$.Execution.Input.ismctsOptions',
             'gameNumber.$': '$$.Map.Item.Value',
         },
         resultWriter: new sfn.ResultWriter({
