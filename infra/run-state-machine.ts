@@ -6,6 +6,7 @@ import * as tasks from 'aws-cdk-lib/aws-stepfunctions-tasks';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import { Construct } from 'constructs';
 import { OUTER_DISTRIBUTED_MAP_RESULTS_PREFIX } from '../src/artifact-retention.js';
+import { addThrottleRetry } from './lambda-retry.js';
 
 /**
  * generate-matchups resolves the run's matchup
@@ -27,6 +28,7 @@ export function buildRunStateMachine(
         lambdaFunction: generateMatchupsFunction,
         payloadResponseOnly: true,
     });
+    addThrottleRetry(generateMatchups);
 
     const runMatchup = new tasks.StepFunctionsStartExecution(scope, 'RunMatchup', {
         stateMachine: matchupStateMachine,
@@ -43,11 +45,15 @@ export function buildRunStateMachine(
     });
 
     const runMatchupsForRun = new sfn.DistributedMap(scope, 'RunMatchupsForRun', {
-        // Deliberately low: each item starts a whole matchup child workflow
-        // (its own inner Distributed Map fanning out to run-game), so this
-        // multiplies actual Lambda concurrency - keep it small
-        // until the account's concurrency headroom is known.
-        maxConcurrency: 3,
+        // 1, deliberately: each item starts a whole matchup child workflow
+        // that itself fans out to run-game at up to 10 concurrent (matching
+        // the account's Lambda concurrency limit - see infra/state-machine.ts).
+        // Running multiple matchups concurrently here would multiply that
+        // demand past the account limit, causing games to wait long enough
+        // to exhaust their retry budget and abort the whole run - happened
+        // in practice at maxConcurrency: 3. Raise this only alongside a
+        // Lambda concurrency quota increase.
+        maxConcurrency: 1,
         itemReader: new sfn.S3JsonItemReader({
             bucket: resultsBucket,
             key: sfn.JsonPath.stringAt('$.matchupsKey'),
@@ -80,6 +86,7 @@ export function buildRunStateMachine(
         }),
         payloadResponseOnly: true,
     });
+    addThrottleRetry(aggregateRun);
 
     const definition = generateMatchups.next(runMatchupsForRun).next(aggregateRun);
 

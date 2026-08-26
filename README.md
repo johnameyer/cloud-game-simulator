@@ -132,6 +132,7 @@ cloud-game-simulator/
 │   └── lambda-simulator.ts       # CDK app entry point
 ├── infra/                        # CDK stack and state machines
 │   ├── engine-version.ts         # Hash of the engine packages' built output
+│   ├── lambda-retry.ts           # Shared throttle-retry config
 │   ├── run-state-machine.ts      # Per-run state machine
 │   ├── stack.ts                  # CDK stack: bucket, tables, Lambdas, state machines
 │   └── state-machine.ts          # Per-matchup state machine

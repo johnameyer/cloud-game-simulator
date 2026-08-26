@@ -5,6 +5,7 @@ import * as tasks from 'aws-cdk-lib/aws-stepfunctions-tasks';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import { Construct } from 'constructs';
 import { DISTRIBUTED_MAP_RESULTS_PREFIX } from '../src/artifact-retention.js';
+import { addThrottleRetry } from './lambda-retry.js';
 
 /**
  * One matchup, with the inner Map as a Distributed Map. This validates the ResultWriter
@@ -28,16 +29,7 @@ export function buildMatchupStateMachine(
         lambdaFunction: runGameFunction,
         payloadResponseOnly: true,
     });
-    // CDK's default LambdaInvoke retry list omits throttling - concurrent
-    // matchups (each running its own maxConcurrency-wide fan-out below) can
-    // burst well past the account's Lambda concurrency limit and get 429s
-    // that would otherwise fail the whole matchup instead of just backing off.
-    runGame.addRetry({
-        errors: [ 'Lambda.TooManyRequestsException' ],
-        interval: Duration.seconds(2),
-        maxAttempts: 6,
-        backoffRate: 2,
-    });
+    addThrottleRetry(runGame);
 
     const runGamesForMatchup = new sfn.DistributedMap(scope, 'RunGamesForMatchup', {
         itemsPath: '$.gameNumbers',
@@ -67,6 +59,7 @@ export function buildMatchupStateMachine(
         lambdaFunction: aggregateMatchupFunction,
         payloadResponseOnly: true,
     });
+    addThrottleRetry(aggregateMatchup);
 
     const definition = runGamesForMatchup.next(aggregateMatchup);
 
