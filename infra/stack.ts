@@ -129,13 +129,29 @@ export class LambdaSimulatorStack extends Stack {
             entry: path.join(__dirname, '../src/handlers/run-game.ts'),
             handler: 'handler',
             runtime: lambda.Runtime.NODEJS_22_X,
-            // A default-strategy game comfortably fits well under this; a
-            // high-iteration ISMCTS game (e.g. 1000 iterations/move) is far
-            // more expensive per move, hence the generous ceiling - still
-            // tight enough that a genuinely hung game fails well before the
-            // matchup state machine's own 30-minute timeout.
-            timeout: Duration.minutes(10),
-            memorySize: 512,
+            // Lambda's absolute maximum. A default-strategy game finishes in
+            // well under a minute, but a real ISMCTS-1000-iteration game
+            // measured in practice exceeded 10 minutes and hit that timeout
+            // mid-simulation (Sandbox.Timedout) - bumped to the ceiling
+            // rather than guess again; if 15 minutes still isn't enough,
+            // Lambda cannot run a single game like this at all and iterations
+            // need to come down instead.
+            timeout: Duration.minutes(15),
+            /*
+             * Lambda allocates CPU proportional to memory. This workload is
+             * single-threaded (one ISMCTS iteration loop) and measured
+             * peak memory use is ~230MB regardless of iteration count
+             * (confirmed compute-bound, not memory-bound), so extra vCPUs past the ~1,769MB
+             * single-vCPU point shouldn't help in theory - but 1024->2048MB
+             * measurably cut real wall-clock time (350-iteration timeout
+             * rate dropped from 3/5 to 1/5), so empirically there's more
+             * headroom than the single-vCPU theory alone predicts (likely
+             * memory bandwidth/cache). Pushing further to test that -
+             * 3008MB was the author's account quota ceiling (a 4096MB
+             * deploy failed with a service quota error), so that's the max
+             * available without requesting a quota increase.
+             */
+            memorySize: 3008,
             environment: {
                 RESULTS_BUCKET: this.resultsBucket.bucketName,
             },
